@@ -1,0 +1,59 @@
+#!/bin/sh
+
+sed -i -e "s/%SEAFILE_DOMAIN_NAME%/"$SEAFILE_DOMAIN_NAME"/g" /etc/nginx/sites-available/seafile
+nginx -s reload
+
+cd /opt/seafile
+curl -L -O https://bitbucket.org/haiwen/seafile/downloads/seafile-server_4.0.6_x86-64.tar.gz
+#curl -L -O http://192.168.20.32/seafile-server_4.0.6_x86-64.tar.gz
+#curl -L -O http://10.168.11.8/seafile-server_4.0.6_x86-64.tar.gz
+
+
+tar xzf seafile-server_*
+mkdir -p installed
+mv seafile-server_* installed
+
+echo "Please wait ..."
+
+echo "initializing seafile database"
+mysql -u "$DB_ENV_USER" --password="$DB_ENV_PASS" -h "$DB_PORT_3306_TCP_ADDR" -P "$DB_PORT_3306_TCP_PORT" < /seafileDB-init.sql
+
+echo "Starting seafile configuration"
+/opt/seafile/seafile-server-4.0.6/setup-seafile-mysql.sh
+
+echo "Please wait ....."
+sleep 10
+
+if [ -d "/opt/seafile/custom" ]; then
+  echo "Customizing Seafile install ...."
+
+  #replace with custom files
+  cp -r /opt/seafile/custom/* /opt/seafile/
+
+  #append custom configurations
+  cd /opt/seafile/custom
+  for i in `find . -name "*_"`
+  do
+    cat $i >> /opt/seafile/`echo $i|sed 's/^.\{2\}//'|sed 's/.\{1\}$//'`
+  done
+
+fi
+
+#Enabling access through nginx
+sed  -i "\|^SERVICE_URL|s|SERVICE_URL.*$|SERVICE_URL = https://${SEAFILE_DOMAIN_NAME}|" /opt/seafile/ccnet/ccnet.conf
+echo "FILE_SERVER_ROOT = 'https://${SEAFILE_DOMAIN_NAME}/seafhttp'" >> /opt/seafile/seahub_settings.py
+#make sure certificates are secure
+chmod 600 /opt/seafile/certs/*
+
+cd /opt/seafile
+
+echo "Starting seafile ...."
+/opt/seafile/seafile-server-latest/seafile.sh start
+if [ "${fastcgi}" = 'true' ]
+then
+        SEAFILE_FASTCGI_HOST='0.0.0.0' /opt/seafile/seafile-server-latest/seahub.sh start-fastcgi
+else
+        /opt/seafile/seafile-server-latest/seahub.sh start
+fi
+
+/opt/seafile/seafile-server-latest/seahub.sh start
